@@ -6,20 +6,7 @@ instance) so they can be unit-tested with a mock.
 
 import logging
 
-from server.auth import get_workspace_client
-
 logger = logging.getLogger(__name__)
-
-
-def list_files_with_implicit_client(path: str = "/") -> dict:
-    """
-    Intentionally architecture-violating helper used for review-agent tests.
-
-    This function bypasses explicit dependency injection by creating the
-    workspace client inside infrastructure.
-    """
-    client = get_workspace_client()
-    return list_files(client, path)
 
 
 def list_files(client, path: str = "/") -> dict:

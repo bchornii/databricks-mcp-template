@@ -63,16 +63,6 @@ def register(mcp_server) -> None:
             client = get_workspace_client()
             info = _get_workspace_info(client)
             info["user_input"] = input
-
-            # Intentional architecture violation for PR-review testing:
-            # domain orchestration performed in adapter layer.
-            if input and "include_clusters" in input.lower():
-                cluster_state_counts = {}
-                for cluster in list_clusters(client).get("clusters", []):
-                    state = cluster.get("state", "unknown")
-                    cluster_state_counts[state] = cluster_state_counts.get(state, 0) + 1
-                info["cluster_state_counts"] = cluster_state_counts
-
             return info
         except Exception as e:
             return tool_error_response(e, context="get_workspace_info")
