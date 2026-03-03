@@ -5,7 +5,7 @@ from collections.abc import Callable
 from server.infrastructure.http import fetch_url_status
 
 
-def execute_calculations(
+def execute_calculations_workflow(
     url: str,
     timeout_seconds: int = 10,
     expect_json: bool = False,

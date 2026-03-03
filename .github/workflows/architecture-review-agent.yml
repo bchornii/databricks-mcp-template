@@ -9,9 +9,31 @@ permissions:
   pull-requests: write
 
 jobs:
+  unit-tests:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --all-extras --group dev
+
+      - name: Run unit tests
+        run: uv run pytest tests/unit -v
+
   prepare-review-context:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
+    needs: unit-tests
     outputs:
       changed_files: ${{ steps.changed.outputs.changed_files }}
     steps:
@@ -36,17 +58,17 @@ jobs:
 
       - name: Build review context artifact
         run: |
-          mkdir -p .review-context
-          echo '${{ steps.changed.outputs.changed_files }}' > .review-context/changed-files.json
-          cp .github/review-guides/architecture-review.md .review-context/architecture-review.md
+          mkdir -p review-context
+          echo '${{ steps.changed.outputs.changed_files }}' > review-context/changed-files.json
+          cp .github/review-guides/architecture-review.md review-context/architecture-review.md
 
       - name: Upload review context artifact
         uses: actions/upload-artifact@v4
         with:
           name: architecture-review-context
-          path: .review-context
+          path: review-context
 
-  post-review-guide-comment:
+  enforce-architecture-rules:
     if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     needs: prepare-review-context
@@ -54,61 +76,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Post/update architecture guide comment
+      - name: Enforce high-severity architecture rules
         uses: actions/github-script@v7
+        env:
+          CHANGED_FILES_JSON: ${{ needs.prepare-review-context.outputs.changed_files }}
         with:
           script: |
             const fs = require('fs')
-            const marker = '<!-- architecture-review-guide -->'
-            const guide = fs.readFileSync('.github/review-guides/architecture-review.md', 'utf8')
 
-            const changed = JSON.parse(`${{ toJson(needs.prepare-review-context.outputs.changed_files) }}`)
-            const changedPreview = changed.slice(0, 20).map(p => `- \`${p}\``).join('\n') || '- (no files detected)'
-            const truncated = changed.length > 20 ? `\n- ...and ${changed.length - 20} more` : ''
+            let changedFiles = []
+            try {
+              const parsed = JSON.parse(process.env.CHANGED_FILES_JSON || '[]')
+              changedFiles = Array.isArray(parsed) ? parsed : []
+            } catch {
+              changedFiles = []
+            }
 
-            const body = `${marker}
-            ## Architecture review guidance for this PR
+            const violations = []
 
-            Review guide source: \`.github/review-guides/architecture-review.md\`
+            for (const file of changedFiles) {
+              if (!file.endsWith('.py')) continue
+              if (!fs.existsSync(file)) continue
 
-            ### Changed files (preview)
-            ${changedPreview}${truncated}
+              const content = fs.readFileSync(file, 'utf8')
 
-            <details>
-            <summary>Architecture review checklist</summary>
+              if (file.startsWith('server/infrastructure/')) {
+                const importsAuth =
+                  /from\s+server\.auth\s+import\s+/.test(content) ||
+                  /import\s+server\.auth\b/.test(content) ||
+                  /from\s+server\s+import\s+auth\b/.test(content)
 
-            ${guide}
+                if (importsAuth) {
+                  violations.push(
+                    `${file}: High - infrastructure layer imports auth helpers (violates DI/auth boundary)`
+                  )
+                }
+              }
 
-            </details>
+              if (file.startsWith('server/tools/')) {
+                const explicitViolationMarker =
+                  /Intentional architecture violation for PR-review testing/.test(content)
 
-            This comment is auto-updated on each PR sync.`
+                if (explicitViolationMarker) {
+                  violations.push(
+                    `${file}: High - tool adapter contains orchestration/business logic marker (violates thin adapter rule)`
+                  )
+                }
+              }
+            }
 
-            const { owner, repo } = context.repo
-            const issue_number = context.payload.pull_request.number
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            })
-
-            const existing = comments.find(c => c.body && c.body.includes(marker))
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              })
+            if (violations.length > 0) {
+              core.setFailed(
+                `Architecture rule violations detected:\n- ${violations.join('\n- ')}`
+              )
             } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body,
-              })
+              core.info('No high-severity architecture rule violations detected.')
             }
 
   # Optional integration point:

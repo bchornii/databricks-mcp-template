@@ -130,3 +130,21 @@ def test_fetch_api_status_tool(mcp_server_url):
         {"url": "https://httpbin.org/get", "timeout_seconds": 10},
     )
     assert result is not None
+
+
+def test_execute_calculations_tool(mcp_server_url):
+    """The ``execute_calculations`` tool returns workflow output structure."""
+    client = DatabricksMCPClient(server_url=f"{mcp_server_url}/mcp")
+    url = "https://httpbin.org/json"
+    result = client.call_tool(
+        "execute_calculations",
+        {"url": url, "timeout_seconds": 10, "expect_json": True},
+    )
+
+    assert result is not None
+    payload = getattr(result, "structuredContent", result)
+    assert isinstance(payload, dict)
+    assert payload.get("endpoint") == url
+    assert payload.get("verdict") in {"healthy", "degraded", "unhealthy"}
+    assert isinstance(payload.get("rules"), list)
+    assert isinstance(payload.get("normalized_response"), dict)

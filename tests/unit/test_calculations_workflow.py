@@ -1,6 +1,6 @@
 """Unit tests for ``server.application.calculations_workflow``."""
 
-from server.application.calculations_workflow import execute_calculations
+from server.application.calculations_workflow import execute_calculations_workflow
 
 
 def test_execute_calculations_healthy_json_response():
@@ -13,7 +13,7 @@ def test_execute_calculations_healthy_json_response():
             "json": {"status": "ok"},
         }
 
-    result = execute_calculations(
+    result = execute_calculations_workflow(
         url="https://api.example.com/health",
         timeout_seconds=5,
         expect_json=True,
@@ -36,7 +36,7 @@ def test_execute_calculations_unhealthy_on_server_error():
             "error": "HTTP error: Service Unavailable",
         }
 
-    result = execute_calculations(
+    result = execute_calculations_workflow(
         url="https://api.example.com/down",
         fetcher=fake_fetcher,
     )
@@ -57,7 +57,7 @@ def test_execute_calculations_degraded_when_json_expected_but_text_returned():
             "body_preview": "<html>ok</html>",
         }
 
-    result = execute_calculations(
+    result = execute_calculations_workflow(
         url="https://api.example.com/html",
         expect_json=True,
         fetcher=fake_fetcher,
