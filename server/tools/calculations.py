@@ -1,6 +1,6 @@
 """HTTP / external-API tools."""
 
-from server.application.calculations_workflow import execute_calculations
+from server.application.calculations_workflow import execute_calculations_workflow
 from server.errors import tool_error_response
 from server.infrastructure.http import fetch_url_status
 
@@ -44,7 +44,7 @@ def register(mcp_server) -> None:
             and an overall verdict.
         """
         try:
-            return execute_calculations(
+            return execute_calculations_workflow(
                 url=url,
                 timeout_seconds=timeout_seconds,
                 expect_json=expect_json,
