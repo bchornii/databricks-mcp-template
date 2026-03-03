@@ -1,0 +1,119 @@
+name: Architecture Review (Agent Guided)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  prepare-review-context:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    outputs:
+      changed_files: ${{ steps.changed.outputs.changed_files }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Collect changed files
+        id: changed
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              per_page: 100
+            })
+
+            const names = files.map(f => f.filename)
+            core.setOutput('changed_files', JSON.stringify(names))
+
+      - name: Build review context artifact
+        run: |
+          mkdir -p .review-context
+          echo '${{ steps.changed.outputs.changed_files }}' > .review-context/changed-files.json
+          cp .github/review-guides/architecture-review.md .review-context/architecture-review.md
+
+      - name: Upload review context artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-review-context
+          path: .review-context
+
+  post-review-guide-comment:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    needs: prepare-review-context
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Post/update architecture guide comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs')
+            const marker = '<!-- architecture-review-guide -->'
+            const guide = fs.readFileSync('.github/review-guides/architecture-review.md', 'utf8')
+
+            const changed = JSON.parse(`${{ toJson(needs.prepare-review-context.outputs.changed_files) }}`)
+            const changedPreview = changed.slice(0, 20).map(p => `- \`${p}\``).join('\n') || '- (no files detected)'
+            const truncated = changed.length > 20 ? `\n- ...and ${changed.length - 20} more` : ''
+
+            const body = `${marker}
+            ## Architecture review guidance for this PR
+
+            Review guide source: \`.github/review-guides/architecture-review.md\`
+
+            ### Changed files (preview)
+            ${changedPreview}${truncated}
+
+            <details>
+            <summary>Architecture review checklist</summary>
+
+            ${guide}
+
+            </details>
+
+            This comment is auto-updated on each PR sync.`
+
+            const { owner, repo } = context.repo
+            const issue_number = context.payload.pull_request.number
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            })
+
+            const existing = comments.find(c => c.body && c.body.includes(marker))
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              })
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              })
+            }
+
+  # Optional integration point:
+  # Add a third job that invokes your preferred review agent/LLM tool.
+  # Feed it:
+  #   1) .github/review-guides/architecture-review.md
+  #   2) pull request diff or changed files from prepare-review-context
+  # Then publish findings as PR comments/check summaries.
